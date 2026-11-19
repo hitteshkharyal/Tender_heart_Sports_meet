@@ -48,7 +48,7 @@ class PersonDetector:
             return []
 
     def _detect_yolo(self, frame):
-        result = self.model(frame, classes=[0], conf=self.confidence, verbose=False)[0]
+        result = self.model(frame, classes=[0], conf=self.confidence, imgsz=384, verbose=False)[0]
         if result.boxes is None or len(result.boxes) == 0:
             return []
         xyxy = result.boxes.xyxy.cpu().numpy()

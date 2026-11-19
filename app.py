@@ -646,7 +646,14 @@ with col_vid:
             mode=WebRtcMode.SENDRECV,
             rtc_configuration=rtc_config,
             video_processor_factory=WebRTCProcessor,
-            media_stream_constraints={"video": {"width": {"ideal": 1280}, "height": {"ideal": 720}}, "audio": False},
+            media_stream_constraints={
+                "video": {
+                    "width": {"min": 640, "ideal": 1280},
+                    "height": {"min": 480, "ideal": 720},
+                    "frameRate": {"ideal": 20, "max": 24}
+                },
+                "audio": False
+            },
             async_processing=True,
         )
 

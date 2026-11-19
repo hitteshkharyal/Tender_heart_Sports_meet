@@ -90,8 +90,8 @@ CAMERA_RETRY_INTERVAL = 2.5    # Seconds between reconnect attempts when disconn
 # "hog"  -> force OpenCV HOG (built-in, lightweight)
 DETECTOR = "auto"
 YOLO_MODEL = os.path.join(BASE_DIR, "yolov8n.pt")
-CONFIDENCE = 0.45
-DETECT_EVERY_N_FRAMES = 1      # Raise to 2 or 3 on low-power devices
+CONFIDENCE = 0.35
+DETECT_EVERY_N_FRAMES = 2      # Process every 2nd frame for smooth, lag-free inference
 
 # ---------------- Counting & Tracking ----------------
 # "unique" -> Person counted once when entering & seen for MIN_FRAMES_TO_COUNT frames.
