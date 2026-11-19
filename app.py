@@ -15,7 +15,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 try:
-    from streamlit_webrtc import webrtc_streamer, RTCConfiguration, VideoProcessorBase
+    from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration, VideoProcessorBase
     import av
     HAS_WEBRTC = True
 except Exception:
@@ -191,7 +191,9 @@ st.markdown("""
         align-items: center !important;
     }
 
-    [data-testid="stImage"] img {
+    [data-testid="stImage"] img,
+    div[data-testid="stWebRtc"] video,
+    video {
         width: 100% !important;
         max-height: 520px !important;
         object-fit: contain !important;
@@ -442,13 +444,11 @@ with col_st:
 
 
 with col_vid:
-    # Camera Source Options: Browser Device Camera, Live WebRTC, or Hardware USB Camera
-    cam_options = ["📱 Device Camera (Browser)", "🎥 Hardware USB Camera"]
-    if HAS_WEBRTC:
-        cam_options.insert(1, "⚡ Live WebRTC Stream")
+    # Camera Source Options: Browser Live Camera (WebRTC) or Local Hardware USB Camera
+    cam_options = ["🌐 Browser Live Camera", "🎥 Hardware USB Camera"]
 
     # Smart default: on Windows with local hardware webcam, default to Hardware USB
-    # On Cloud / Linux, default to Device Camera (Browser)
+    # On Cloud / Linux, default to Browser Live Camera
     default_cam_idx = 0
     if sys.platform.startswith("win"):
         if "has_hw_cam" not in st.session_state:
@@ -457,7 +457,7 @@ with col_vid:
             if _test is not None:
                 st.session_state["cap"] = _test
         if st.session_state.get("has_hw_cam", False):
-            default_cam_idx = cam_options.index("🎥 Hardware USB Camera") if "🎥 Hardware USB Camera" in cam_options else 0
+            default_cam_idx = 1
 
     cam_mode = st.radio(
         "Camera Mode",
@@ -607,71 +607,10 @@ if not st.session_state.camera_on:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (140, 150, 180), 1)
     img_ph.image(off_img, channels="RGB", width="stretch")
 
-elif cam_mode == "📱 Device Camera (Browser)":
-    # --- Mode 1: Device Camera (Browser Native) ---
+elif cam_mode == "🌐 Browser Live Camera" and HAS_WEBRTC:
+    # --- Mode 1: Browser Live Camera Stream (Native WebRTC & Permission Prompt) ---
     status_ph.markdown(
-        f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE — DEVICE CAMERA ({detector.backend.upper()})</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Using your laptop / phone camera</span></div>",
-        unsafe_allow_html=True
-    )
-    cam_file = st.camera_input("Device Camera Viewfinder", key="dev_cam_input")
-    if cam_file is not None:
-        bytes_data = cam_file.getvalue()
-        frame = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-        if frame is not None and frame.size > 0:
-            if not in_cooldown:
-                try:
-                    dets = detector.detect(frame)
-                    people = tracker.update(dets, frame)
-                    for p in people.values():
-                        if p.disappeared > 0:
-                            continue
-                        if p.is_returning and p.guest_number is not None:
-                            if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
-                                tracker.registry.record_greeting(p.guest_number)
-                                st.session_state.popup_time = time.time()
-                                st.session_state.popup_title = "WELCOME BACK!"
-                                st.session_state.popup_subtitle = "GREAT TO SEE YOU AGAIN!"
-                                st.session_state.popup_guest = p.guest_number
-                                voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026! Great to see you again!")
-                                voice.play_chime()
-                            continue
-                        if not p.counted:
-                            p.counted = True
-                            stats.add(1)
-                            new_gid = stats.total
-                            p.guest_number = new_gid
-                            p.label = f"Guest #{new_gid}"
-                            tracker.registry.register(new_gid, p.appearance_sig)
-                            st.session_state.popup_time = time.time()
-                            st.session_state.popup_title = C.WELCOME_HEADLINE
-                            st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
-                            st.session_state.popup_guest = new_gid
-                            voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
-                            voice.play_chime()
-                except Exception as e:
-                    print(f"[app] Device camera processing error: {e}")
-
-            vis = tracker.visible()
-            n_vis = len(vis)
-            if st.session_state.show_boxes:
-                for p in vis:
-                    x1, y1, x2, y2 = [int(v) for v in p.box[:4]]
-                    col = (0, 220, 130) if p.counted else (0, 215, 255)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), col, 2)
-                    tag = p.label
-                    (tw, tht), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-                    cv2.rectangle(frame, (x1, y1 - tht - 8), (x1 + tw + 10, y1), col, -1)
-                    cv2.putText(frame, tag, (x1 + 5, y1 - 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (10, 16, 32), 2)
-
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img_ph.image(rgb, channels="RGB", width="stretch")
-            update_cards(n_vis)
-
-elif HAS_WEBRTC and cam_mode == "⚡ Live WebRTC Stream":
-    # --- Mode 2: Live WebRTC Real-Time Browser Stream ---
-    status_ph.markdown(
-        f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE WEBRTC — {detector.backend.upper()}</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Click 'START' to stream directly from your device camera</span></div>",
+        f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE — BROWSER WEBCAM ({detector.backend.upper()})</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Continuous real-time attendee detection</span></div>",
         unsafe_allow_html=True
     )
 
@@ -682,29 +621,52 @@ elif HAS_WEBRTC and cam_mode == "⚡ Live WebRTC Stream":
         def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
             img = frame.to_ndarray(format="bgr24")
             self.frame_idx += 1
-            try:
-                if self.frame_idx % max(1, C.DETECT_EVERY_N_FRAMES) == 0:
+            now = time.time()
+            in_cooldown = now < st.session_state.get("reset_cooldown", 0.0)
+
+            # Continuous Person Detection & Re-ID
+            if not in_cooldown and (self.frame_idx % max(1, C.DETECT_EVERY_N_FRAMES) == 0):
+                try:
                     dets = detector.detect(img)
                     people = tracker.update(dets, img)
                     for p in people.values():
                         if p.disappeared > 0:
                             continue
+
+                        # Case 1: Returning Guest -> Greet, DO NOT Recount!
                         if p.is_returning and p.guest_number is not None:
                             if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
                                 tracker.registry.record_greeting(p.guest_number)
-                                voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026!")
+                                st.session_state.popup_time = time.time()
+                                st.session_state.popup_title = "WELCOME BACK!"
+                                st.session_state.popup_subtitle = "GREAT TO SEE YOU AGAIN!"
+                                st.session_state.popup_guest = p.guest_number
+                                voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026! Great to see you again!")
                                 voice.play_chime()
                             continue
-                        if not p.counted:
-                            p.counted = True
-                            stats.add(1)
-                            p.guest_number = stats.total
-                            p.label = f"Guest #{stats.total}"
-                            tracker.registry.register(stats.total, p.appearance_sig)
-                            voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
-                            voice.play_chime()
 
-                if st.session_state.get("show_boxes", True):
+                        # Case 2: Genuinely New Attendee -> Register & Count ONCE
+                        if not p.counted:
+                            if p.frames_seen >= C.MIN_FRAMES_TO_COUNT:
+                                p.counted = True
+                                stats.add(1)
+                                new_gid = stats.total
+                                p.guest_number = new_gid
+                                p.label = f"Guest #{new_gid}"
+                                tracker.registry.register(new_gid, p.appearance_sig)
+
+                                st.session_state.popup_time = time.time()
+                                st.session_state.popup_title = C.WELCOME_HEADLINE
+                                st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
+                                st.session_state.popup_guest = new_gid
+                                voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
+                                voice.play_chime()
+                except Exception as e:
+                    print(f"[app] WebRTC frame error: {e}")
+
+            # Draw continuous Bounding Boxes with stable Guest Number tags
+            if st.session_state.get("show_boxes", True):
+                try:
                     for p in tracker.visible():
                         x1, y1, x2, y2 = [int(v) for v in p.box[:4]]
                         col = (0, 220, 130) if p.counted else (0, 215, 255)
@@ -714,19 +676,29 @@ elif HAS_WEBRTC and cam_mode == "⚡ Live WebRTC Stream":
                         cv2.rectangle(img, (x1, y1 - tht - 8), (x1 + tw + 10, y1), col, -1)
                         cv2.putText(img, tag, (x1 + 5, y1 - 5),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (10, 16, 32), 2)
-            except Exception:
-                pass
+                except Exception:
+                    pass
+
             return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-    webrtc_streamer(
-        key="sportsmeet_webrtc",
-        video_processor_factory=WebRTCProcessor,
-        rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
-        media_stream_constraints={"video": True, "audio": False},
+    rtc_config = RTCConfiguration(
+        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}]}
     )
 
+    ctx = webrtc_streamer(
+        key="sportsmeet_live_preview",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration=rtc_config,
+        video_processor_factory=WebRTCProcessor,
+        media_stream_constraints={"video": {"width": {"ideal": 1280}, "height": {"ideal": 720}}, "audio": False},
+        async_processing=True,
+    )
+
+    if ctx.state.playing:
+        update_cards(len(tracker.visible()))
+
 else:
-    # --- Mode 3: Hardware USB Camera (Auto-Scan Camera Indices 0, 1, 2, 3) ---
+    # --- Mode 2: Hardware USB Camera (Continuous High-FPS OpenCV Loop) ---
     if "cap" not in st.session_state or st.session_state["cap"] is None or not st.session_state["cap"].isOpened():
         st.session_state["cap"] = safe_open_camera(C.CAMERA_SOURCE)
     cap = st.session_state["cap"]
@@ -810,14 +782,14 @@ else:
                 frame_idx += 1
             else:
                 status_ph.markdown(
-                    "<div style='margin-bottom:4px;'><span style='background:rgba(235,50,60,0.18); border:1px solid #eb323c; color:#eb323c; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● NO HARDWARE CAMERA DETECTED</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Switch to 'Device Camera' above!</span></div>",
+                    "<div style='margin-bottom:4px;'><span style='background:rgba(235,50,60,0.18); border:1px solid #eb323c; color:#eb323c; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● NO HARDWARE CAMERA DETECTED</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Switch to 'Browser Live Camera' above!</span></div>",
                     unsafe_allow_html=True
                 )
                 blank = np.zeros((480, 854, 3), dtype=np.uint8)
                 blank[:] = (12, 18, 38)
                 cv2.putText(blank, "NO HARDWARE CAMERA FOUND ON HOST", (135, 220),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.75, (60, 60, 220), 2)
-                cv2.putText(blank, "Select 'Device Camera (Browser)' above to use your camera!",
+                cv2.putText(blank, "Select 'Browser Live Camera' above to use your camera!",
                             (110, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 200, 235), 1)
                 img_ph.image(blank, channels="RGB", width="stretch")
                 update_cards(0)
