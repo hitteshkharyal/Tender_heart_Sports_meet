@@ -352,9 +352,9 @@ def safe_open_camera(source=None):
     return None
 
 
-# ==================== HEADER STRIP ====================
-now_dt = datetime.datetime.now()
-time_str = now_dt.strftime("%I:%M:%S %p").lstrip("0")
+# ==================== HEADER STRIP (INDIA STANDARD TIME: GMT +5:30) ====================
+now_dt = C.get_ist_now()
+time_str = now_dt.strftime("%I:%M:%S %p").lstrip("0") + " IST"
 date_str = now_dt.strftime("%A, %d %B %Y")
 
 st.markdown(f"""

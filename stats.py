@@ -7,6 +7,9 @@ import json
 import os
 import time
 
+# India Standard Time (IST = GMT +5:30)
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30), name="IST")
+
 
 class VisitorStats:
     def __init__(self, path, reset_daily=True):
@@ -14,7 +17,7 @@ class VisitorStats:
         self.total = 0
         self.arrivals = []       # unix timestamps of arrivals (trimmed to last 24h)
         self.session_new = 0     # arrivals in current app session
-        self.today = datetime.date.today().isoformat()
+        self.today = datetime.datetime.now(IST).date().isoformat()
         self._load(reset_daily)
 
     def _load(self, reset_daily):
@@ -51,7 +54,7 @@ class VisitorStats:
                 "date": self.today,
                 "total": self.total,
                 "arrivals": self.arrivals,
-                "last_updated": datetime.datetime.now().isoformat(),
+                "last_updated": datetime.datetime.now(IST).isoformat(),
             }
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2)

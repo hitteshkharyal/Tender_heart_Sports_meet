@@ -41,15 +41,24 @@ TICKER_TEXT = (
 )
 
 
+# ---------------- Timezone (India Standard Time: GMT +5:30) ----------------
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30), name="IST")
+
+
+def get_ist_now():
+    """Returns current datetime in Indian Standard Time (GMT +5:30)."""
+    return datetime.datetime.now(IST)
+
+
 def get_time_greeting(hour=None):
     """
-    Returns time-based greeting according to local system time:
+    Returns time-based greeting according to Indian Standard Time (IST):
       - 5:00 AM to 11:59 AM: Good Morning!
       - 12:00 PM to 4:59 PM: Good Afternoon!
       - 5:00 PM to 4:59 AM:  Good Evening!
     """
     if hour is None:
-        hour = datetime.datetime.now().hour
+        hour = get_ist_now().hour
     if 5 <= hour < 12:
         return "Good Morning!"
     elif 12 <= hour < 17:
