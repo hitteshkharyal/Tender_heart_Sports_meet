@@ -14,6 +14,13 @@ import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
 
+try:
+    from streamlit_webrtc import webrtc_streamer, RTCConfiguration, VideoProcessorBase
+    import av
+    HAS_WEBRTC = True
+except Exception:
+    HAS_WEBRTC = False
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config as C
@@ -301,31 +308,45 @@ if "reset_cooldown" not in st.session_state:
 
 
 # ==================== SAFE CAMERA OPEN HELPER ====================
-def safe_open_camera(source=C.CAMERA_SOURCE):
-    """Safely open camera source with error guards to avoid C++ crashes."""
-    cap = None
-    try:
-        if isinstance(source, str) and source.isdigit():
-            source = int(source)
-        backend = cv2.CAP_DSHOW if (isinstance(source, int) and sys.platform.startswith("win")) else cv2.CAP_ANY
-        cap = cv2.VideoCapture(source, backend)
-        if cap is not None and cap.isOpened():
+def safe_open_camera(source=None):
+    """
+    Safely open any available camera source.
+    Scans all device camera indices (0, 1, 2, 3, 4) with both DirectShow and standard backends,
+    verifying actual frame readability before returning.
+    """
+    candidates = []
+    if source is not None and not isinstance(source, int):
+        candidates.append(source)
+    else:
+        primary = C.CAMERA_SOURCE if source is None else source
+        candidates = [primary] + [i for i in [0, 1, 2, 3, 4] if i != primary]
+
+    for src in candidates:
+        backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if (isinstance(src, int) and sys.platform.startswith("win")) else [cv2.CAP_ANY]
+        for b in backends:
+            cap = None
             try:
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, C.CAMERA_WIDTH)
+                cap = cv2.VideoCapture(src, b)
+                if cap is not None and cap.isOpened():
+                    ok, frame = cap.read()
+                    if ok and frame is not None and frame.size > 0:
+                        try:
+                            cap.set(cv2.CAP_PROP_FRAME_WIDTH, C.CAMERA_WIDTH)
+                        except Exception:
+                            pass
+                        try:
+                            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, C.CAMERA_HEIGHT)
+                        except Exception:
+                            pass
+                        print(f"[camera] Successfully connected to device camera {src}")
+                        return cap
+                    cap.release()
             except Exception:
-                pass
-            try:
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, C.CAMERA_HEIGHT)
-            except Exception:
-                pass
-            return cap
-    except Exception as e:
-        print(f"[camera] Failed to open source {source}: {e}")
-    if cap is not None:
-        try:
-            cap.release()
-        except Exception:
-            pass
+                if cap is not None:
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
     return None
 
 
@@ -421,6 +442,32 @@ with col_st:
 
 
 with col_vid:
+    # Camera Source Options: Browser Device Camera, Live WebRTC, or Hardware USB Camera
+    cam_options = ["📱 Device Camera (Browser)", "🎥 Hardware USB Camera"]
+    if HAS_WEBRTC:
+        cam_options.insert(1, "⚡ Live WebRTC Stream")
+
+    # Smart default: on Windows with local hardware webcam, default to Hardware USB
+    # On Cloud / Linux, default to Device Camera (Browser)
+    default_cam_idx = 0
+    if sys.platform.startswith("win"):
+        if "has_hw_cam" not in st.session_state:
+            _test = safe_open_camera()
+            st.session_state.has_hw_cam = (_test is not None)
+            if _test is not None:
+                st.session_state["cap"] = _test
+        if st.session_state.get("has_hw_cam", False):
+            default_cam_idx = cam_options.index("🎥 Hardware USB Camera") if "🎥 Hardware USB Camera" in cam_options else 0
+
+    cam_mode = st.radio(
+        "Camera Mode",
+        cam_options,
+        index=default_cam_idx,
+        horizontal=True,
+        key="cam_mode_select",
+        label_visibility="collapsed"
+    )
+
     popup_ph = st.empty()
     status_ph = st.empty()
     img_ph = st.empty()
@@ -522,16 +569,30 @@ def update_cards(in_view=0):
 update_cards(0)
 
 
-# ==================== PERSISTENT CAMERA INITIALIZATION ====================
-if st.session_state.camera_on:
-    if "cap" not in st.session_state or st.session_state["cap"] is None or not st.session_state["cap"].isOpened():
-        st.session_state["cap"] = safe_open_camera(C.CAMERA_SOURCE)
-    cap = st.session_state["cap"]
+# ==================== MAIN CAMERA & VIDEO DISPATCHER ====================
+now = time.time()
+in_cooldown = now < st.session_state.get("reset_cooldown", 0.0)
+
+# --- Live Welcome Popup Banner or Reset Notice ---
+if in_cooldown:
+    popup_ph.markdown("""
+    <div class="glass-popup" style="border-color: #00dc82;">
+      <p class="popup-title-text" style="color: #00dc82;">✨ ATTENDEE COUNT RESET TO 0</p>
+      <p class="popup-sub-text" style="color: #ffffff;">Ready to welcome attendees!</p>
+    </div>""", unsafe_allow_html=True)
+elif now - st.session_state.popup_time < C.POPUP_SECONDS:
+    p_title = st.session_state.get("popup_title", C.WELCOME_HEADLINE)
+    p_sub = st.session_state.get("popup_subtitle", C.WELCOME_SUBHEAD)
+    popup_ph.markdown(f"""
+    <div class="glass-popup">
+      <p class="popup-title-text">🎉 {p_title}</p>
+      <p class="popup-sub-text">{p_sub}</p>
+      <span class="popup-badge-pill">GUEST #{st.session_state.popup_guest:,}</span>
+    </div>""", unsafe_allow_html=True)
 else:
-    cap = None
+    popup_ph.empty()
 
 
-# ==================== MAIN VIDEO LOOP ====================
 if not st.session_state.camera_on:
     # --- Camera OFF Standby ---
     status_ph.markdown(
@@ -545,8 +606,131 @@ if not st.session_state.camera_on:
     cv2.putText(off_img, "Click 'Camera ON' to resume detection", (215, 275),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (140, 150, 180), 1)
     img_ph.image(off_img, channels="RGB", width="stretch")
+
+elif cam_mode == "📱 Device Camera (Browser)":
+    # --- Mode 1: Device Camera (Browser Native) ---
+    status_ph.markdown(
+        f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE — DEVICE CAMERA ({detector.backend.upper()})</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Using your laptop / phone camera</span></div>",
+        unsafe_allow_html=True
+    )
+    cam_file = st.camera_input("Device Camera Viewfinder", key="dev_cam_input")
+    if cam_file is not None:
+        bytes_data = cam_file.getvalue()
+        frame = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+        if frame is not None and frame.size > 0:
+            if not in_cooldown:
+                try:
+                    dets = detector.detect(frame)
+                    people = tracker.update(dets, frame)
+                    for p in people.values():
+                        if p.disappeared > 0:
+                            continue
+                        if p.is_returning and p.guest_number is not None:
+                            if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
+                                tracker.registry.record_greeting(p.guest_number)
+                                st.session_state.popup_time = time.time()
+                                st.session_state.popup_title = "WELCOME BACK!"
+                                st.session_state.popup_subtitle = "GREAT TO SEE YOU AGAIN!"
+                                st.session_state.popup_guest = p.guest_number
+                                voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026! Great to see you again!")
+                                voice.play_chime()
+                            continue
+                        if not p.counted:
+                            p.counted = True
+                            stats.add(1)
+                            new_gid = stats.total
+                            p.guest_number = new_gid
+                            p.label = f"Guest #{new_gid}"
+                            tracker.registry.register(new_gid, p.appearance_sig)
+                            st.session_state.popup_time = time.time()
+                            st.session_state.popup_title = C.WELCOME_HEADLINE
+                            st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
+                            st.session_state.popup_guest = new_gid
+                            voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
+                            voice.play_chime()
+                except Exception as e:
+                    print(f"[app] Device camera processing error: {e}")
+
+            vis = tracker.visible()
+            n_vis = len(vis)
+            if st.session_state.show_boxes:
+                for p in vis:
+                    x1, y1, x2, y2 = [int(v) for v in p.box[:4]]
+                    col = (0, 220, 130) if p.counted else (0, 215, 255)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), col, 2)
+                    tag = p.label
+                    (tw, tht), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                    cv2.rectangle(frame, (x1, y1 - tht - 8), (x1 + tw + 10, y1), col, -1)
+                    cv2.putText(frame, tag, (x1 + 5, y1 - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (10, 16, 32), 2)
+
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img_ph.image(rgb, channels="RGB", width="stretch")
+            update_cards(n_vis)
+
+elif HAS_WEBRTC and cam_mode == "⚡ Live WebRTC Stream":
+    # --- Mode 2: Live WebRTC Real-Time Browser Stream ---
+    status_ph.markdown(
+        f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE WEBRTC — {detector.backend.upper()}</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Click 'START' to stream directly from your device camera</span></div>",
+        unsafe_allow_html=True
+    )
+
+    class WebRTCProcessor(VideoProcessorBase):
+        def __init__(self):
+            self.frame_idx = 0
+
+        def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+            img = frame.to_ndarray(format="bgr24")
+            self.frame_idx += 1
+            try:
+                if self.frame_idx % max(1, C.DETECT_EVERY_N_FRAMES) == 0:
+                    dets = detector.detect(img)
+                    people = tracker.update(dets, img)
+                    for p in people.values():
+                        if p.disappeared > 0:
+                            continue
+                        if p.is_returning and p.guest_number is not None:
+                            if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
+                                tracker.registry.record_greeting(p.guest_number)
+                                voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026!")
+                                voice.play_chime()
+                            continue
+                        if not p.counted:
+                            p.counted = True
+                            stats.add(1)
+                            p.guest_number = stats.total
+                            p.label = f"Guest #{stats.total}"
+                            tracker.registry.register(stats.total, p.appearance_sig)
+                            voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
+                            voice.play_chime()
+
+                if st.session_state.get("show_boxes", True):
+                    for p in tracker.visible():
+                        x1, y1, x2, y2 = [int(v) for v in p.box[:4]]
+                        col = (0, 220, 130) if p.counted else (0, 215, 255)
+                        cv2.rectangle(img, (x1, y1), (x2, y2), col, 2)
+                        tag = p.label
+                        (tw, tht), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                        cv2.rectangle(img, (x1, y1 - tht - 8), (x1 + tw + 10, y1), col, -1)
+                        cv2.putText(img, tag, (x1 + 5, y1 - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (10, 16, 32), 2)
+            except Exception:
+                pass
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+    webrtc_streamer(
+        key="sportsmeet_webrtc",
+        video_processor_factory=WebRTCProcessor,
+        rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+        media_stream_constraints={"video": True, "audio": False},
+    )
+
 else:
-    # --- Camera ON Live Stream ---
+    # --- Mode 3: Hardware USB Camera (Auto-Scan Camera Indices 0, 1, 2, 3) ---
+    if "cap" not in st.session_state or st.session_state["cap"] is None or not st.session_state["cap"].isOpened():
+        st.session_state["cap"] = safe_open_camera(C.CAMERA_SOURCE)
+    cap = st.session_state["cap"]
+
     det_name = detector.backend.upper()
     frame_idx = 0
 
@@ -565,45 +749,19 @@ else:
                 except Exception:
                     frame = None
 
-            now = time.time()
-            in_cooldown = now < st.session_state.get("reset_cooldown", 0.0)
-
-            # --- Live Welcome Popup Banner or Reset Notice ---
-            if in_cooldown:
-                popup_ph.markdown("""
-                <div class="glass-popup" style="border-color: #00dc82;">
-                  <p class="popup-title-text" style="color: #00dc82;">✨ ATTENDEE COUNT RESET TO 0</p>
-                  <p class="popup-sub-text" style="color: #ffffff;">Ready to welcome attendees!</p>
-                </div>""", unsafe_allow_html=True)
-            elif now - st.session_state.popup_time < C.POPUP_SECONDS:
-                p_title = st.session_state.get("popup_title", C.WELCOME_HEADLINE)
-                p_sub = st.session_state.get("popup_subtitle", C.WELCOME_SUBHEAD)
-                popup_ph.markdown(f"""
-                <div class="glass-popup">
-                  <p class="popup-title-text">🎉 {p_title}</p>
-                  <p class="popup-sub-text">{p_sub}</p>
-                  <span class="popup-badge-pill">GUEST #{st.session_state.popup_guest:,}</span>
-                </div>""", unsafe_allow_html=True)
-            else:
-                popup_ph.empty()
-
             if connected and frame is not None:
                 status_ph.markdown(
                     f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE — {det_name}</span></div>",
                     unsafe_allow_html=True
                 )
 
-                # Detection + Tracking + Intelligent Re-ID
                 if not in_cooldown and (frame_idx % max(1, C.DETECT_EVERY_N_FRAMES) == 0):
                     try:
                         dets = detector.detect(frame)
                         people = tracker.update(dets, frame)
-
                         for p in people.values():
                             if p.disappeared > 0:
                                 continue
-
-                            # Case 1: Returning Guest -> Greet, DO NOT Recount!
                             if p.is_returning and p.guest_number is not None:
                                 if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
                                     tracker.registry.record_greeting(p.guest_number)
@@ -614,8 +772,6 @@ else:
                                     voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026! Great to see you again!")
                                     voice.play_chime()
                                 continue
-
-                            # Case 2: Genuinely New Attendee -> Register & Count ONCE
                             if not p.counted:
                                 if p.frames_seen >= C.MIN_FRAMES_TO_COUNT:
                                     p.counted = True
@@ -632,12 +788,11 @@ else:
                                     voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
                                     voice.play_chime()
                     except Exception as e:
-                        print(f"[app] Detection loop error: {e}")
+                        print(f"[app] Hardware camera detection error: {e}")
 
                 vis = tracker.visible()
                 n_vis = len(vis)
 
-                # Draw Bounding Boxes with stable Guest Number tags
                 if st.session_state.show_boxes:
                     for p in vis:
                         x1, y1, x2, y2 = [int(v) for v in p.box[:4]]
@@ -654,22 +809,21 @@ else:
                 update_cards(n_vis)
                 frame_idx += 1
             else:
-                # Disconnected / no frame
                 status_ph.markdown(
-                    "<div style='margin-bottom:4px;'><span style='background:rgba(235,50,60,0.18); border:1px solid #eb323c; color:#eb323c; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● DISCONNECTED</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Reconnecting…</span></div>",
+                    "<div style='margin-bottom:4px;'><span style='background:rgba(235,50,60,0.18); border:1px solid #eb323c; color:#eb323c; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● NO HARDWARE CAMERA DETECTED</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Switch to 'Device Camera' above!</span></div>",
                     unsafe_allow_html=True
                 )
                 blank = np.zeros((480, 854, 3), dtype=np.uint8)
                 blank[:] = (12, 18, 38)
-                cv2.putText(blank, "CAMERA NOT CONNECTED", (235, 230),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (60, 60, 220), 2)
-                cv2.putText(blank, "Check cable or CAMERA_SOURCE in config.py",
-                            (195, 275), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (140, 150, 180), 1)
+                cv2.putText(blank, "NO HARDWARE CAMERA FOUND ON HOST", (135, 220),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.75, (60, 60, 220), 2)
+                cv2.putText(blank, "Select 'Device Camera (Browser)' above to use your camera!",
+                            (110, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 200, 235), 1)
                 img_ph.image(blank, channels="RGB", width="stretch")
                 update_cards(0)
-                time.sleep(1.5)
+                time.sleep(2.0)
                 if cap is None or not cap.isOpened():
-                    st.session_state["cap"] = safe_open_camera(C.CAMERA_SOURCE)
+                    st.session_state["cap"] = safe_open_camera()
                     cap = st.session_state["cap"]
 
             time.sleep(0.015)
