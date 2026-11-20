@@ -41,26 +41,33 @@ st.set_page_config(
 # ==================== GLASSMORPHISM PROFESSIONAL STYLING ====================
 st.markdown("""
 <style>
-    /* Hide Streamlit default menu, footer, and toolbar while keeping sidebar active */
+    /* Hide Streamlit default footer and toolbar */
     #MainMenu, footer, [data-testid="stToolbar"] {
         display: none !important;
     }
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 0 !important;
+    }
 
-    /* Floating gold collapse/expand sidebar controller */
+    /* Style the sidebar toggle button cleanly */
     [data-testid="collapsedControl"] {
-        display: flex !important;
-        background: rgba(15, 25, 54, 0.9) !important;
-        border: 1px solid rgba(255, 215, 0, 0.5) !important;
+        background: rgba(18, 30, 66, 0.95) !important;
+        border: 1px solid rgba(255, 215, 0, 0.6) !important;
         border-radius: 8px !important;
         color: #ffd700 !important;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6) !important;
         top: 0.6rem !important;
         left: 0.6rem !important;
         z-index: 999999 !important;
     }
-    [data-testid="collapsedControl"]:hover {
-        background: rgba(37, 99, 235, 0.7) !important;
-        border-color: #ffd700 !important;
+    [data-testid="collapsedControl"] button {
+        color: #ffd700 !important;
+    }
+    [data-testid="stSidebarCollapseButton"] button {
+        color: #ffd700 !important;
+        background: rgba(255, 255, 255, 0.08) !important;
+        border-radius: 6px !important;
     }
 
     /* Ambient Sports Stadium Background with Luminous Lighting */
@@ -292,25 +299,18 @@ st.markdown("""
         padding: 0 !important;
     }
 
-    /* Modern Glassmorphic Dark Sidebar (Visible in Normal & Fullscreen Mode) */
-    section[data-testid="stSidebar"],
-    :fullscreen section[data-testid="stSidebar"],
-    :-webkit-full-screen section[data-testid="stSidebar"] {
-        display: block !important;
-        visibility: visible !important;
+    /* Modern Glassmorphic Dark Sidebar */
+    section[data-testid="stSidebar"] {
         background: #080f26 !important;
         border-right: 1px solid rgba(255, 215, 0, 0.3) !important;
-        z-index: 1000000 !important;
-    }
-    section[data-testid="stSidebar"] > div {
-        overflow-y: auto !important;
     }
     section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
         gap: 0.6rem !important;
     }
 
-    /* All text inside sidebar is white and clear */
-    section[data-testid="stSidebar"] * {
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] {
         color: #ffffff !important;
     }
     section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
@@ -358,16 +358,6 @@ st.markdown("""
         font-size: 13px !important;
         font-weight: 600 !important;
     }
-
-    /* Keep Sidebar Toggle Button visible in Fullscreen */
-    [data-testid="collapsedControl"],
-    :fullscreen [data-testid="collapsedControl"],
-    :-webkit-full-screen [data-testid="collapsedControl"] {
-        display: flex !important;
-        visibility: visible !important;
-        background: rgba(15, 25, 54, 0.95) !important;
-        border: 1px solid rgba(255, 215, 0, 0.6) !important;
-        border-radius: 8px !important;
         color: #ffd700 !important;
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6) !important;
         top: 0.6rem !important;
