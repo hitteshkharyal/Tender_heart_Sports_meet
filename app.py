@@ -325,8 +325,8 @@ POPUP_STATE = {
 def list_hardware_cameras():
     """Detect available physical hardware cameras on the host machine."""
     cams = []
-    # Test indices 1 (USB camera priority), 0 (built-in priority), 2
-    for idx in [1, 0, 2]:
+    # Priority order: 0 (External Lenovo FHD Cam), 1 (Built-in Laptop Webcam), 2
+    for idx in [0, 1, 2]:
         backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
         cap = cv2.VideoCapture(idx, backend)
         if cap is not None and cap.isOpened():
@@ -339,16 +339,16 @@ def list_hardware_cameras():
             ret, frame = cap.read()
             if ret and frame is not None and frame.size > 0:
                 h, w = frame.shape[:2]
-                if idx == 1:
-                    lbl = f"📷 Camera 1: External USB HD ({w}x{h})"
-                elif idx == 0:
-                    lbl = f"📷 Camera 0: Built-in Webcam ({w}x{h})"
+                if idx == 0:
+                    lbl = f"📷 Camera 0: External Lenovo FHD Cam ({w}x{h})"
+                elif idx == 1:
+                    lbl = f"📷 Camera 1: Built-in Laptop Webcam ({w}x{h})"
                 else:
                     lbl = f"📷 Camera {idx} ({w}x{h})"
                 cams.append((idx, lbl))
             cap.release()
     if not cams:
-        cams = [(1, "📷 Camera 1: External USB HD"), (0, "📷 Camera 0: Built-in Webcam")]
+        cams = [(0, "📷 Camera 0: External Lenovo FHD Cam"), (1, "📷 Camera 1: Built-in Laptop Webcam")]
     return cams
 
 
@@ -363,8 +363,9 @@ def safe_open_camera(source=None):
     elif source is not None:
         candidates = [source]
     else:
+        # Priority: Camera 0 (Lenovo FHD External Camera), then 1 (Built-in)
         primary = C.CAMERA_SOURCE
-        candidates = [primary] + [i for i in [1, 0, 2] if i != primary]
+        candidates = [primary] + [i for i in [0, 1, 2] if i != primary]
 
     for src in candidates:
         backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if (isinstance(src, int) and sys.platform.startswith("win")) else [cv2.CAP_ANY]
@@ -558,7 +559,7 @@ with col_vid:
     default_cam_idx = 0
     if sys.platform.startswith("win"):
         if "has_hw_cam" not in st.session_state:
-            _test = safe_open_camera(1) or safe_open_camera(0)
+            _test = safe_open_camera(0) or safe_open_camera(1)
             st.session_state.has_hw_cam = (_test is not None)
             if _test is not None:
                 st.session_state["cap"] = _test
@@ -581,9 +582,10 @@ with col_vid:
             cam_indices = [c[0] for c in hw_cams]
             cam_labels = [c[1] for c in hw_cams]
 
+            # Priority 1: External Lenovo FHD Cam (Camera 0)
             pref_pos = 0
-            if 1 in cam_indices:
-                pref_pos = cam_indices.index(1)
+            if 0 in cam_indices:
+                pref_pos = cam_indices.index(0)
             elif C.CAMERA_SOURCE in cam_indices:
                 pref_pos = cam_indices.index(C.CAMERA_SOURCE)
 

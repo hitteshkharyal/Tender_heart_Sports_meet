@@ -75,9 +75,9 @@ VOICE_COOLDOWN = 3.0           # Minimum seconds between spoken welcomes
 PLAY_SOUND = True              # Optional pleasant chime alongside voice
 
 # ---------------- Camera / Video Feed ----------------
-# 1 = external USB webcam (e.g. Lenovo HD), 0 = built-in webcam,
+# 0 = External Lenovo FHD webcam (Top Priority), 1 = Built-in laptop webcam,
 # or a path / URL, e.g. "demo.mp4" or "rtsp://..."
-CAMERA_SOURCE = 1
+CAMERA_SOURCE = 0
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
 MIRROR_CAMERA = False          # Flip horizontally (helpful for front-facing gate cameras)
