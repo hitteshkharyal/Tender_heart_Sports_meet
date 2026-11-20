@@ -270,8 +270,78 @@ st.markdown("""
         box-shadow: 0 0 18px rgba(255, 215, 0, 0.4) !important;
         transform: translateY(-1px) !important;
     }
+
+    iframe[title="streamlit_components_html.html"],
+    div[data-testid="stCustomComponentV1"] {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# Native HTML5 Fullscreen Controller
+components.html("""
+<script>
+(function() {
+    function setupFullscreen() {
+        try {
+            var doc = window.parent.document;
+            var buttons = doc.querySelectorAll('button');
+            buttons.forEach(function(btn) {
+                if (btn.textContent && (btn.textContent.indexOf('Fullscreen') !== -1 || btn.textContent.indexOf('⛶') !== -1)) {
+                    if (!btn.getAttribute('data-fs-ready')) {
+                        btn.setAttribute('data-fs-ready', 'true');
+                        btn.addEventListener('click', function(e) {
+                            try {
+                                if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
+                                    var el = doc.documentElement;
+                                    if (el.requestFullscreen) {
+                                        el.requestFullscreen();
+                                    } else if (el.webkitRequestFullscreen) {
+                                        el.webkitRequestFullscreen();
+                                    } else if (el.msRequestFullscreen) {
+                                        el.msRequestFullscreen();
+                                    }
+                                } else {
+                                    if (doc.exitFullscreen) {
+                                        doc.exitFullscreen();
+                                    } else if (doc.webkitExitFullscreen) {
+                                        doc.webkitExitFullscreen();
+                                    } else if (doc.msExitFullscreen) {
+                                        doc.msExitFullscreen();
+                                    }
+                                }
+                            } catch(err) {
+                                console.log('Fullscreen error:', err);
+                            }
+                        }, true);
+                    }
+                }
+            });
+        } catch(e) {}
+    }
+    setupFullscreen();
+    setInterval(setupFullscreen, 500);
+
+    try {
+        var doc = window.parent.document;
+        if (!doc._fsListenerAttached) {
+            doc._fsListenerAttached = true;
+            doc.addEventListener('fullscreenchange', function() {
+                var isFs = !!(doc.fullscreenElement || doc.webkitFullscreenElement);
+                var btn = doc.querySelector('button[data-fs-ready="true"]');
+                if (btn) {
+                    var p = btn.querySelector('p') || btn;
+                    p.textContent = isFs ? '🗗 Exit Fullscreen' : '⛶ Fullscreen';
+                }
+            });
+        }
+    } catch(e) {}
+})();
+</script>
+""", height=0)
 
 
 # ==================== SINGLETON BACK-END SERVICES ====================
