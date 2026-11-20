@@ -35,18 +35,32 @@ st.set_page_config(
     page_title="Sports Meet 2026 - Smart Greeter",
     page_icon="🏆",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ==================== GLASSMORPHISM PROFESSIONAL STYLING ====================
 st.markdown("""
 <style>
-    /* Completely hide Streamlit Header, Footer, Sidebar, and Toolbar */
-    #MainMenu, header, footer,
-    [data-testid="stSidebar"],
-    [data-testid="collapsedControl"],
-    [data-testid="stToolbar"] {
+    /* Hide Streamlit default menu, footer, and toolbar while keeping sidebar active */
+    #MainMenu, footer, [data-testid="stToolbar"] {
         display: none !important;
+    }
+
+    /* Floating gold collapse/expand sidebar controller */
+    [data-testid="collapsedControl"] {
+        display: flex !important;
+        background: rgba(15, 25, 54, 0.9) !important;
+        border: 1px solid rgba(255, 215, 0, 0.5) !important;
+        border-radius: 8px !important;
+        color: #ffd700 !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+        top: 0.6rem !important;
+        left: 0.6rem !important;
+        z-index: 999999 !important;
+    }
+    [data-testid="collapsedControl"]:hover {
+        background: rgba(37, 99, 235, 0.7) !important;
+        border-color: #ffd700 !important;
     }
 
     /* Ambient Sports Stadium Background with Luminous Lighting */
