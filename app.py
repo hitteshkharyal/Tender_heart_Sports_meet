@@ -7,6 +7,7 @@
 import datetime
 import os
 import sys
+import threading
 import time
 
 import cv2
@@ -311,19 +312,59 @@ if "reset_cooldown" not in st.session_state:
     st.session_state.reset_cooldown = 0.0
 
 
-# ==================== SAFE CAMERA OPEN HELPER ====================
+# Global thread-safe notification state for WebRTC & OpenCV background workers
+POPUP_STATE = {
+    "time": 0.0,
+    "title": C.WELCOME_HEADLINE,
+    "subtitle": C.WELCOME_SUBHEAD,
+    "guest_id": 0
+}
+
+
+# ==================== HARDWARE CAMERA PROBE & SAFE OPEN HELPER ====================
+def list_hardware_cameras():
+    """Detect available physical hardware cameras on the host machine."""
+    cams = []
+    # Test indices 1 (USB camera priority), 0 (built-in priority), 2
+    for idx in [1, 0, 2]:
+        backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
+        cap = cv2.VideoCapture(idx, backend)
+        if cap is not None and cap.isOpened():
+            try:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            except Exception:
+                pass
+            ret, frame = cap.read()
+            if ret and frame is not None and frame.size > 0:
+                h, w = frame.shape[:2]
+                if idx == 1:
+                    lbl = f"📷 Camera 1: External USB HD ({w}x{h})"
+                elif idx == 0:
+                    lbl = f"📷 Camera 0: Built-in Webcam ({w}x{h})"
+                else:
+                    lbl = f"📷 Camera {idx} ({w}x{h})"
+                cams.append((idx, lbl))
+            cap.release()
+    if not cams:
+        cams = [(1, "📷 Camera 1: External USB HD"), (0, "📷 Camera 0: Built-in Webcam")]
+    return cams
+
+
 def safe_open_camera(source=None):
     """
-    Safely open any available camera source at native HD resolution.
-    Sets MJPG hardware compression and 1280x720 / 1080p target dimensions BEFORE
+    Safely open the specified camera source at native HD resolution.
+    Sets MJPG hardware compression and 1280x720 target dimensions BEFORE
     initial frame acquisition to prevent Windows DirectShow from locking to 480p YUY2.
     """
-    candidates = []
     if source is not None and not isinstance(source, int):
-        candidates.append(source)
+        candidates = [source]
+    elif source is not None:
+        candidates = [source]
     else:
-        primary = C.CAMERA_SOURCE if source is None else source
-        candidates = [primary] + [i for i in [0, 1, 2, 3, 4] if i != primary]
+        primary = C.CAMERA_SOURCE
+        candidates = [primary] + [i for i in [1, 0, 2] if i != primary]
 
     for src in candidates:
         backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if (isinstance(src, int) and sys.platform.startswith("win")) else [cv2.CAP_ANY]
@@ -332,7 +373,6 @@ def safe_open_camera(source=None):
             try:
                 cap = cv2.VideoCapture(src, b)
                 if cap is not None and cap.isOpened():
-                    # Set MJPG codec & resolution BEFORE reading to prevent driver 480p lock
                     try:
                         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
                     except Exception:
@@ -472,10 +512,15 @@ with col_st:
         if st.button("🎉 Test (+1)", key="tw_btn", use_container_width=True):
             stats.add(1)
             gid = stats.total
-            st.session_state.popup_time = time.time()
+            now = time.time()
+            st.session_state.popup_time = now
             st.session_state.popup_title = C.WELCOME_HEADLINE
             st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
             st.session_state.popup_guest = gid
+            POPUP_STATE["time"] = now
+            POPUP_STATE["title"] = C.WELCOME_HEADLINE
+            POPUP_STATE["subtitle"] = C.WELCOME_SUBHEAD
+            POPUP_STATE["guest_id"] = gid
             voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
             voice.play_chime()
 
@@ -491,6 +536,8 @@ with col_st:
             tracker.reset()
             st.session_state.popup_time = 0.0
             st.session_state.popup_guest = 0
+            POPUP_STATE["time"] = 0.0
+            POPUP_STATE["guest_id"] = 0
             st.session_state.reset_cooldown = time.time() + 2.5
             st.toast("✅ Reset complete! All guest counts cleared to 0.")
 
@@ -511,21 +558,58 @@ with col_vid:
     default_cam_idx = 0
     if sys.platform.startswith("win"):
         if "has_hw_cam" not in st.session_state:
-            _test = safe_open_camera()
+            _test = safe_open_camera(1) or safe_open_camera(0)
             st.session_state.has_hw_cam = (_test is not None)
             if _test is not None:
                 st.session_state["cap"] = _test
         if st.session_state.get("has_hw_cam", False):
             default_cam_idx = 1
 
-    cam_mode = st.radio(
-        "Camera Mode",
-        cam_options,
-        index=default_cam_idx,
-        horizontal=True,
-        key="cam_mode_select",
-        label_visibility="collapsed"
-    )
+    col_m1, col_m2 = st.columns([1.1, 1.3])
+    with col_m1:
+        cam_mode = st.radio(
+            "Camera Mode",
+            cam_options,
+            index=default_cam_idx,
+            horizontal=True,
+            key="cam_mode_select",
+            label_visibility="collapsed"
+        )
+    with col_m2:
+        if cam_mode == "🎥 Hardware USB Camera":
+            hw_cams = list_hardware_cameras()
+            cam_indices = [c[0] for c in hw_cams]
+            cam_labels = [c[1] for c in hw_cams]
+
+            pref_pos = 0
+            if 1 in cam_indices:
+                pref_pos = cam_indices.index(1)
+            elif C.CAMERA_SOURCE in cam_indices:
+                pref_pos = cam_indices.index(C.CAMERA_SOURCE)
+
+            cur_sel = st.session_state.get("hw_cam_choice_idx", pref_pos)
+            if cur_sel >= len(cam_labels):
+                cur_sel = 0
+
+            chosen_label = st.selectbox(
+                "Hardware Camera Source",
+                options=cam_labels,
+                index=cur_sel,
+                key="hw_camera_choice",
+                label_visibility="collapsed"
+            )
+            chosen_cam_idx = hw_cams[cam_labels.index(chosen_label)][0]
+            st.session_state.hw_cam_choice_idx = cam_labels.index(chosen_label)
+
+            if st.session_state.get("active_hw_cam_idx") != chosen_cam_idx:
+                st.session_state.active_hw_cam_idx = chosen_cam_idx
+                if "cap" in st.session_state and st.session_state["cap"] is not None:
+                    try:
+                        st.session_state["cap"].release()
+                    except Exception:
+                        pass
+                    st.session_state["cap"] = None
+                st.rerun()
 
     popup_ph = st.empty()
     status_ph = st.empty()
@@ -576,54 +660,75 @@ with col_vid:
         class WebRTCProcessor(VideoProcessorBase):
             def __init__(self):
                 self.frame_idx = 0
+                self.latest_frame = None
+                self.lock = threading.Lock()
+                self.running = True
+                self.worker = threading.Thread(target=self._detection_worker, daemon=True)
+                self.worker.start()
+
+            def _detection_worker(self):
+                while self.running:
+                    target_frame = None
+                    with self.lock:
+                        if self.latest_frame is not None:
+                            target_frame = self.latest_frame.copy()
+                            self.latest_frame = None
+
+                    if target_frame is not None and target_frame.size > 0:
+                        _now = time.time()
+                        _in_cooldown = _now < st.session_state.get("reset_cooldown", 0.0)
+                        if not _in_cooldown:
+                            try:
+                                dets = detector.detect(target_frame)
+                                people = tracker.update(dets, target_frame)
+                                for p in people.values():
+                                    if p.disappeared > 0:
+                                        continue
+
+                                    # Case 1: Returning Guest -> Greet, DO NOT Recount!
+                                    if p.is_returning and p.guest_number is not None:
+                                        if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
+                                            tracker.registry.record_greeting(p.guest_number)
+                                            now_t = time.time()
+                                            POPUP_STATE["time"] = now_t
+                                            POPUP_STATE["title"] = "WELCOME BACK!"
+                                            POPUP_STATE["subtitle"] = "GREAT TO SEE YOU AGAIN!"
+                                            POPUP_STATE["guest_id"] = p.guest_number
+                                            voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026! Great to see you again!")
+                                            voice.play_chime()
+                                        continue
+
+                                    # Case 2: Genuinely New Attendee -> Register & Count ONCE
+                                    if not p.counted:
+                                        if p.frames_seen >= C.MIN_FRAMES_TO_COUNT:
+                                            p.counted = True
+                                            stats.add(1)
+                                            new_gid = stats.total
+                                            p.guest_number = new_gid
+                                            p.label = f"Guest #{new_gid}"
+                                            tracker.registry.register(new_gid, p.appearance_sig)
+
+                                            now_t = time.time()
+                                            POPUP_STATE["time"] = now_t
+                                            POPUP_STATE["title"] = C.WELCOME_HEADLINE
+                                            POPUP_STATE["subtitle"] = C.WELCOME_SUBHEAD
+                                            POPUP_STATE["guest_id"] = new_gid
+                                            voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
+                                            voice.play_chime()
+                            except Exception:
+                                pass
+                    time.sleep(0.02)
 
             def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
                 img = frame.to_ndarray(format="bgr24")
                 self.frame_idx += 1
-                _now = time.time()
-                _in_cooldown = _now < st.session_state.get("reset_cooldown", 0.0)
 
-                # Continuous Person Detection & Re-ID
-                if not _in_cooldown and (self.frame_idx % max(1, C.DETECT_EVERY_N_FRAMES) == 0):
-                    try:
-                        dets = detector.detect(img)
-                        people = tracker.update(dets, img)
-                        for p in people.values():
-                            if p.disappeared > 0:
-                                continue
+                # Send newest frame to background detection thread without blocking stream
+                if self.frame_idx % max(1, C.DETECT_EVERY_N_FRAMES) == 0:
+                    with self.lock:
+                        self.latest_frame = img
 
-                            # Case 1: Returning Guest -> Greet, DO NOT Recount!
-                            if p.is_returning and p.guest_number is not None:
-                                if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
-                                    tracker.registry.record_greeting(p.guest_number)
-                                    st.session_state.popup_time = time.time()
-                                    st.session_state.popup_title = "WELCOME BACK!"
-                                    st.session_state.popup_subtitle = "GREAT TO SEE YOU AGAIN!"
-                                    st.session_state.popup_guest = p.guest_number
-                                    voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026! Great to see you again!")
-                                    voice.play_chime()
-                                continue
-
-                            # Case 2: Genuinely New Attendee -> Register & Count ONCE
-                            if not p.counted:
-                                if p.frames_seen >= C.MIN_FRAMES_TO_COUNT:
-                                    p.counted = True
-                                    stats.add(1)
-                                    new_gid = stats.total
-                                    p.guest_number = new_gid
-                                    p.label = f"Guest #{new_gid}"
-                                    tracker.registry.register(new_gid, p.appearance_sig)
-
-                                    st.session_state.popup_time = time.time()
-                                    st.session_state.popup_title = C.WELCOME_HEADLINE
-                                    st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
-                                    st.session_state.popup_guest = new_gid
-                                    voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
-                                    voice.play_chime()
-                    except Exception as e:
-                        pass
-
-                # Draw continuous Bounding Boxes with stable Guest Number tags
+                # Overlay current tracked bounding boxes immediately (<1ms)
                 if st.session_state.get("show_boxes", True):
                     try:
                         for p in tracker.visible():
@@ -639,6 +744,9 @@ with col_vid:
                         pass
 
                 return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+            def __del__(self):
+                self.running = False
 
         rtc_config = RTCConfiguration({
             "iceServers": [
@@ -664,9 +772,9 @@ with col_vid:
             video_processor_factory=WebRTCProcessor,
             media_stream_constraints={
                 "video": {
-                    "width": {"ideal": 1920, "min": 1280},
-                    "height": {"ideal": 1080, "min": 720},
-                    "frameRate": {"ideal": 30, "min": 24}
+                    "width": {"ideal": 1280},
+                    "height": {"ideal": 720},
+                    "frameRate": {"ideal": 30}
                 },
                 "audio": False
             },
@@ -674,15 +782,43 @@ with col_vid:
         )
 
         if ctx.state.playing:
-            update_cards(len(tracker.visible()))
+            while ctx.state.playing:
+                n_vis = len(tracker.visible())
+                update_cards(n_vis)
+
+                # Live celebratory popup banner
+                now = time.time()
+                if now - POPUP_STATE.get("time", 0.0) < C.POPUP_SECONDS:
+                    p_title = POPUP_STATE.get("title", C.WELCOME_HEADLINE)
+                    p_sub = POPUP_STATE.get("subtitle", C.WELCOME_SUBHEAD)
+                    p_gid = POPUP_STATE.get("guest_id", stats.total)
+                    popup_ph.markdown(f"""
+                    <div class="glass-popup">
+                      <p class="popup-title-text">🎉 {p_title}</p>
+                      <p class="popup-sub-text">{p_sub}</p>
+                      <span class="popup-badge-pill">GUEST #{p_gid:,}</span>
+                    </div>""", unsafe_allow_html=True)
+                else:
+                    popup_ph.empty()
+
+                time.sleep(0.15)
 
     else:
-        # --- Mode 2: Hardware USB Camera (Continuous High-FPS OpenCV Loop) ---
+        # --- Mode 2: Hardware USB Camera (Continuous High-FPS DirectShow / OpenCV Loop) ---
         img_ph = st.empty()
-        if "cap" not in st.session_state or st.session_state["cap"] is None or not st.session_state["cap"].isOpened():
-            st.session_state["cap"] = safe_open_camera(C.CAMERA_SOURCE)
-        cap = st.session_state["cap"]
+        hw_target = st.session_state.get("active_hw_cam_idx", C.CAMERA_SOURCE)
+        if ("cap" not in st.session_state or st.session_state["cap"] is None or
+            not st.session_state["cap"].isOpened() or
+            st.session_state.get("opened_hw_cam_target") != hw_target):
+            if "cap" in st.session_state and st.session_state["cap"] is not None:
+                try:
+                    st.session_state["cap"].release()
+                except Exception:
+                    pass
+            st.session_state["cap"] = safe_open_camera(hw_target)
+            st.session_state.opened_hw_cam_target = hw_target
 
+        cap = st.session_state["cap"]
         det_name = detector.backend.upper()
         frame_idx = 0
 
@@ -703,7 +839,7 @@ with col_vid:
 
                 if connected and frame is not None:
                     status_ph.markdown(
-                        f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE — {det_name}</span></div>",
+                        f"<div style='margin-bottom:4px;'><span style='background:rgba(0,220,130,0.18); border:1px solid #00dc82; color:#00dc82; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● LIVE — {det_name} (CAM {hw_target})</span></div>",
                         unsafe_allow_html=True
                     )
 
@@ -717,10 +853,15 @@ with col_vid:
                                 if p.is_returning and p.guest_number is not None:
                                     if tracker.registry.can_greet_again(p.guest_number, cooldown_seconds=12.0):
                                         tracker.registry.record_greeting(p.guest_number)
-                                        st.session_state.popup_time = time.time()
+                                        now_t = time.time()
+                                        st.session_state.popup_time = now_t
                                         st.session_state.popup_title = "WELCOME BACK!"
                                         st.session_state.popup_subtitle = "GREAT TO SEE YOU AGAIN!"
                                         st.session_state.popup_guest = p.guest_number
+                                        POPUP_STATE["time"] = now_t
+                                        POPUP_STATE["title"] = "WELCOME BACK!"
+                                        POPUP_STATE["subtitle"] = "GREAT TO SEE YOU AGAIN!"
+                                        POPUP_STATE["guest_id"] = p.guest_number
                                         voice.speak(f"Welcome back Guest {p.guest_number} to Sports Meet 2026! Great to see you again!")
                                         voice.play_chime()
                                     continue
@@ -733,10 +874,15 @@ with col_vid:
                                         p.label = f"Guest #{new_gid}"
                                         tracker.registry.register(new_gid, p.appearance_sig)
 
-                                        st.session_state.popup_time = time.time()
+                                        now_t = time.time()
+                                        st.session_state.popup_time = now_t
                                         st.session_state.popup_title = C.WELCOME_HEADLINE
                                         st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
                                         st.session_state.popup_guest = new_gid
+                                        POPUP_STATE["time"] = now_t
+                                        POPUP_STATE["title"] = C.WELCOME_HEADLINE
+                                        POPUP_STATE["subtitle"] = C.WELCOME_SUBHEAD
+                                        POPUP_STATE["guest_id"] = new_gid
                                         voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
                                         voice.play_chime()
                         except Exception as e:
@@ -756,26 +902,41 @@ with col_vid:
                             cv2.putText(frame, tag, (x1 + 5, y1 - 5),
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (10, 16, 32), 2)
 
+                    # Update celebratory banner if active
+                    now = time.time()
+                    if now - POPUP_STATE.get("time", 0.0) < C.POPUP_SECONDS:
+                        p_title = POPUP_STATE.get("title", C.WELCOME_HEADLINE)
+                        p_sub = POPUP_STATE.get("subtitle", C.WELCOME_SUBHEAD)
+                        p_gid = POPUP_STATE.get("guest_id", stats.total)
+                        popup_ph.markdown(f"""
+                        <div class="glass-popup">
+                          <p class="popup-title-text">🎉 {p_title}</p>
+                          <p class="popup-sub-text">{p_sub}</p>
+                          <span class="popup-badge-pill">GUEST #{p_gid:,}</span>
+                        </div>""", unsafe_allow_html=True)
+                    else:
+                        popup_ph.empty()
+
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     img_ph.image(rgb, channels="RGB", use_container_width=True)
                     update_cards(n_vis)
                     frame_idx += 1
                 else:
                     status_ph.markdown(
-                        "<div style='margin-bottom:4px;'><span style='background:rgba(235,50,60,0.18); border:1px solid #eb323c; color:#eb323c; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● NO HARDWARE CAMERA DETECTED</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Switch to 'Browser Live Camera' above!</span></div>",
+                        f"<div style='margin-bottom:4px;'><span style='background:rgba(235,50,60,0.18); border:1px solid #eb323c; color:#eb323c; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:700;'>● CAMERA {hw_target} NOT RESPONDING</span> <span style='color:#94a3b8; font-size:12px; margin-left:8px;'>Switch device or select 'Browser Live Camera'</span></div>",
                         unsafe_allow_html=True
                     )
                     blank = np.zeros((480, 854, 3), dtype=np.uint8)
                     blank[:] = (12, 18, 38)
-                    cv2.putText(blank, "NO HARDWARE CAMERA FOUND ON HOST", (135, 220),
+                    cv2.putText(blank, f"HARDWARE CAMERA {hw_target} NOT CONNECTED", (110, 220),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.75, (60, 60, 220), 2)
-                    cv2.putText(blank, "Select 'Browser Live Camera' above to use your camera!",
-                                (110, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 200, 235), 1)
+                    cv2.putText(blank, "Check USB cable or choose another camera above",
+                                (120, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 200, 235), 1)
                     img_ph.image(blank, channels="RGB", use_container_width=True)
                     update_cards(0)
-                    time.sleep(2.0)
+                    time.sleep(1.5)
                     if cap is None or not cap.isOpened():
-                        st.session_state["cap"] = safe_open_camera()
+                        st.session_state["cap"] = safe_open_camera(hw_target)
                         cap = st.session_state["cap"]
 
                 time.sleep(0.015)
