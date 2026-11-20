@@ -94,26 +94,26 @@ st.markdown("""
     
     .event-title-text {
         margin: 0;
-        font-size: 22px;
+        font-size: 24px;
         font-weight: 900;
         color: #ffffff;
         letter-spacing: 0.5px;
         text-shadow: 0 0 14px rgba(59, 130, 246, 0.7);
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
     }
     
     .school-badge {
         background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
         color: #060a1a;
-        font-size: 11px;
-        font-weight: 800;
-        padding: 2px 8px;
-        border-radius: 6px;
-        letter-spacing: 1px;
+        font-size: 15px;
+        font-weight: 900;
+        padding: 4px 14px;
+        border-radius: 8px;
+        letter-spacing: 1.2px;
         text-transform: uppercase;
-        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+        box-shadow: 0 2px 12px rgba(245, 158, 11, 0.5);
     }
     
     .clock-text {
@@ -277,6 +277,22 @@ st.markdown("""
         height: 0 !important;
         margin: 0 !important;
         padding: 0 !important;
+    }
+
+    /* Modern Glassmorphic Dark Sidebar */
+    section[data-testid="stSidebar"] {
+        background: rgba(10, 16, 36, 0.96) !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
+        gap: 0.5rem !important;
+    }
+    section[data-testid="stSidebar"] .stRadio label,
+    section[data-testid="stSidebar"] .stSelectbox label {
+        color: #94a3b8 !important;
+        font-weight: 700 !important;
+        font-size: 12px !important;
+        text-transform: uppercase !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -542,25 +558,80 @@ def update_cards(in_view=0):
     if "chart_ph" in globals():
         bk = stats.buckets(12, 300)
         labels = [f"-{i*5}m" for i in range(11, -1, -1)]
-        chart_ph.bar_chart(dict(zip(labels, bk)), height=215, color="#2563eb")
+        chart_ph.bar_chart(dict(zip(labels, bk)), height=285, color="#2563eb")
 
 
-# ==================== LAYOUT: VIDEO (LEFT) | STATS & GRAPH (RIGHT) ====================
-col_vid, col_st = st.columns([1.7, 1.0], gap="small")
+# ==================== SIDEBAR: OPERATOR & CAMERA CONTROLS ====================
+with st.sidebar:
+    st.markdown("""
+    <div style="padding: 0 0 10px;">
+      <h3 style="color:#ffd700; font-size:16px; font-weight:900; margin:0; letter-spacing:1px;">
+        ⚙️ ARENA CONTROLS
+      </h3>
+      <p style="color:#94a3b8; font-size:11px; margin:2px 0 0;">Tender Heart High School</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-with col_st:
-    # 1. Total Welcomed Card
-    total_ph = st.empty()
+    # 1. Camera Feed Mode Selector
+    cam_options = ["🌐 Browser Live Camera", "🎥 Hardware USB Camera"]
+    default_cam_idx = 0
+    if sys.platform.startswith("win"):
+        if "has_hw_cam" not in st.session_state:
+            _test = safe_open_camera(0) or safe_open_camera(1)
+            st.session_state.has_hw_cam = (_test is not None)
+            if _test is not None:
+                st.session_state["cap"] = _test
+        if st.session_state.get("has_hw_cam", False):
+            default_cam_idx = 1
 
-    # 2. In View Now & Crowd Status Cards
-    c1, c2 = st.columns(2)
-    view_ph = c1.empty()
-    crowd_ph = c2.empty()
+    cam_mode = st.radio(
+        "Camera Feed Mode",
+        cam_options,
+        index=default_cam_idx,
+        key="cam_mode_select"
+    )
 
-    # 3. Controls Row 1: Camera ON/OFF & Fullscreen Button
-    st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
-    b1, b2 = st.columns(2)
-    with b1:
+    # 2. Hardware Camera Device Selector (Priority: Camera 0 External Lenovo FHD Cam)
+    if cam_mode == "🎥 Hardware USB Camera":
+        hw_cams = list_hardware_cameras()
+        cam_indices = [c[0] for c in hw_cams]
+        cam_labels = [c[1] for c in hw_cams]
+
+        pref_pos = 0
+        if 0 in cam_indices:
+            pref_pos = cam_indices.index(0)
+        elif C.CAMERA_SOURCE in cam_indices:
+            pref_pos = cam_indices.index(C.CAMERA_SOURCE)
+
+        cur_sel = st.session_state.get("hw_cam_choice_idx", pref_pos)
+        if cur_sel >= len(cam_labels):
+            cur_sel = 0
+
+        chosen_label = st.selectbox(
+            "Select Camera Device",
+            options=cam_labels,
+            index=cur_sel,
+            key="hw_camera_choice"
+        )
+        chosen_cam_idx = hw_cams[cam_labels.index(chosen_label)][0]
+        st.session_state.hw_cam_choice_idx = cam_labels.index(chosen_label)
+
+        if st.session_state.get("active_hw_cam_idx") != chosen_cam_idx:
+            st.session_state.active_hw_cam_idx = chosen_cam_idx
+            if "cap" in st.session_state and st.session_state["cap"] is not None:
+                try:
+                    st.session_state["cap"].release()
+                except Exception:
+                    pass
+                st.session_state["cap"] = None
+            st.rerun()
+
+    st.markdown("<hr style='margin:12px 0; border-color:rgba(255,255,255,0.12);'>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin:0 0 6px;'>Arena Operations</p>", unsafe_allow_html=True)
+
+    # 3. Action Buttons
+    sb1, sb2 = st.columns(2)
+    with sb1:
         cam_lbl = "🔴 Camera OFF" if st.session_state.camera_on else "🟢 Camera ON"
         if st.button(cam_lbl, key="cam_btn", use_container_width=True):
             st.session_state.camera_on = not st.session_state.camera_on
@@ -572,49 +643,59 @@ with col_st:
                 st.session_state["cap"] = None
             st.rerun()
 
-    with b2:
-        # Seamless Glassmorphism Fullscreen Button
+    with sb2:
         if st.button("⛶ Fullscreen", key="fs_btn", use_container_width=True):
             pass
 
-    # Controls Row 2: Test, Voice, Reset
-    b3, b4, b5 = st.columns(3)
-    with b3:
-        if st.button("🎉 Test (+1)", key="tw_btn", use_container_width=True):
-            stats.add(1)
-            gid = stats.total
-            now = time.time()
-            st.session_state.popup_time = now
-            st.session_state.popup_title = C.WELCOME_HEADLINE
-            st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
-            st.session_state.popup_guest = gid
-            POPUP_STATE["time"] = now
-            POPUP_STATE["title"] = C.WELCOME_HEADLINE
-            POPUP_STATE["subtitle"] = C.WELCOME_SUBHEAD
-            POPUP_STATE["guest_id"] = gid
-            voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
-            voice.play_chime()
+    if st.button(f"🔊 Voice Greeter: {'ON' if voice.enabled else 'OFF'}", key="v_btn", use_container_width=True):
+        voice.toggle()
+        st.rerun()
 
-    with b4:
-        if st.button(f"🔊 Voice: {'ON' if voice.enabled else 'OFF'}", key="v_btn", use_container_width=True):
-            voice.toggle()
-            st.rerun()
+    if st.button("🎉 Test Welcome (+1)", key="tw_btn", use_container_width=True):
+        stats.add(1)
+        gid = stats.total
+        now = time.time()
+        st.session_state.popup_time = now
+        st.session_state.popup_title = C.WELCOME_HEADLINE
+        st.session_state.popup_subtitle = C.WELCOME_SUBHEAD
+        st.session_state.popup_guest = gid
+        POPUP_STATE["time"] = now
+        POPUP_STATE["title"] = C.WELCOME_HEADLINE
+        POPUP_STATE["subtitle"] = C.WELCOME_SUBHEAD
+        POPUP_STATE["guest_id"] = gid
+        voice.speak("Welcome to Sports Meet 2026! We are happy to have you here!")
+        voice.play_chime()
 
-    with b5:
-        # INSTANT RESET: Clears all guest counts to 0 without hardware reload lag!
-        if st.button("🔄 Reset 0", key="r_btn", use_container_width=True):
-            stats.reset()
-            tracker.reset()
-            st.session_state.popup_time = 0.0
-            st.session_state.popup_guest = 0
-            POPUP_STATE["time"] = 0.0
-            POPUP_STATE["guest_id"] = 0
-            st.session_state.reset_cooldown = time.time() + 2.5
-            st.toast("✅ Reset complete! All guest counts cleared to 0.")
+    # INSTANT RESET: Clears all guest counts to 0 without hardware reload lag!
+    if st.button("🔄 Reset Count to 0", key="r_btn", use_container_width=True):
+        stats.reset()
+        tracker.reset()
+        st.session_state.popup_time = 0.0
+        st.session_state.popup_guest = 0
+        POPUP_STATE["time"] = 0.0
+        POPUP_STATE["guest_id"] = 0
+        st.session_state.reset_cooldown = time.time() + 2.5
+        st.toast("✅ Reset complete! All guest counts cleared to 0.")
 
-    # 4. Large Arrivals Graph (Glassmorphism card, height=215: big, clear & fits comfortably on all screens)
+    st.markdown("<hr style='margin:12px 0; border-color:rgba(255,255,255,0.12);'>", unsafe_allow_html=True)
+    st.session_state.show_boxes = st.checkbox("Show Tracking Boxes", value=st.session_state.get("show_boxes", True), key="chk_boxes")
+
+
+# ==================== MAIN DASHBOARD: VIDEO (LEFT) | STATS & GRAPH (RIGHT) ====================
+col_vid, col_st = st.columns([1.7, 1.0], gap="small")
+
+with col_st:
+    # 1. Total Welcomed Card
+    total_ph = st.empty()
+
+    # 2. In View Now & Crowd Status Cards
+    c1, c2 = st.columns(2)
+    view_ph = c1.empty()
+    crowd_ph = c2.empty()
+
+    # 3. Large Arrivals Graph (Glassmorphism card, height=285)
     st.markdown("<p style='font-size:11px;font-weight:700;color:#94a3b8;"
-                "text-transform:uppercase;margin:6px 0 2px'>📊 Arrivals Trend (Last 60 Min)</p>",
+                "text-transform:uppercase;margin:8px 0 2px'>📊 Arrivals Trend (Last 60 Min)</p>",
                 unsafe_allow_html=True)
     chart_ph = st.empty()
 
@@ -623,66 +704,6 @@ with col_st:
 
 
 with col_vid:
-    # Camera Source Options: Browser Live Camera (WebRTC) or Local Hardware USB Camera
-    cam_options = ["🌐 Browser Live Camera", "🎥 Hardware USB Camera"]
-
-    default_cam_idx = 0
-    if sys.platform.startswith("win"):
-        if "has_hw_cam" not in st.session_state:
-            _test = safe_open_camera(0) or safe_open_camera(1)
-            st.session_state.has_hw_cam = (_test is not None)
-            if _test is not None:
-                st.session_state["cap"] = _test
-        if st.session_state.get("has_hw_cam", False):
-            default_cam_idx = 1
-
-    col_m1, col_m2 = st.columns([1.1, 1.3])
-    with col_m1:
-        cam_mode = st.radio(
-            "Camera Mode",
-            cam_options,
-            index=default_cam_idx,
-            horizontal=True,
-            key="cam_mode_select",
-            label_visibility="collapsed"
-        )
-    with col_m2:
-        if cam_mode == "🎥 Hardware USB Camera":
-            hw_cams = list_hardware_cameras()
-            cam_indices = [c[0] for c in hw_cams]
-            cam_labels = [c[1] for c in hw_cams]
-
-            # Priority 1: External Lenovo FHD Cam (Camera 0)
-            pref_pos = 0
-            if 0 in cam_indices:
-                pref_pos = cam_indices.index(0)
-            elif C.CAMERA_SOURCE in cam_indices:
-                pref_pos = cam_indices.index(C.CAMERA_SOURCE)
-
-            cur_sel = st.session_state.get("hw_cam_choice_idx", pref_pos)
-            if cur_sel >= len(cam_labels):
-                cur_sel = 0
-
-            chosen_label = st.selectbox(
-                "Hardware Camera Source",
-                options=cam_labels,
-                index=cur_sel,
-                key="hw_camera_choice",
-                label_visibility="collapsed"
-            )
-            chosen_cam_idx = hw_cams[cam_labels.index(chosen_label)][0]
-            st.session_state.hw_cam_choice_idx = cam_labels.index(chosen_label)
-
-            if st.session_state.get("active_hw_cam_idx") != chosen_cam_idx:
-                st.session_state.active_hw_cam_idx = chosen_cam_idx
-                if "cap" in st.session_state and st.session_state["cap"] is not None:
-                    try:
-                        st.session_state["cap"].release()
-                    except Exception:
-                        pass
-                    st.session_state["cap"] = None
-                st.rerun()
-
     popup_ph = st.empty()
     status_ph = st.empty()
 

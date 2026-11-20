@@ -12,7 +12,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------- Branding ----------------
-SCHOOL_NAME = "TENDER HEART SCHOOL"
+SCHOOL_NAME = "TENDER HEART HIGH SCHOOL"
 EVENT_TITLE = "SPORTS MEET 2026"
 TAGLINE = "Play Fair  •  Play Hard  •  Play Together"
 
@@ -23,7 +23,7 @@ WELCOME_SUBHEAD = "WE ARE HAPPY TO HAVE YOU HERE!"
 # Rotating event announcements & sports spirit messages
 ROTATING_MESSAGES = [
     "Welcome parents, guests, and athletes to Sports Meet 2026!",
-    "Tender Heart School welcomes you to an extraordinary day of sport!",
+    "Tender Heart High School welcomes you to an extraordinary day of sport!",
     "Cheer loud, cheer proud for every champion on the field!",
     "Faster  •  Higher  •  Stronger  •  Together",
     "Drinking water, refreshments, and first aid available near Pavilions A & B.",
@@ -33,7 +33,7 @@ ROTATING_MESSAGES = [
 
 # Text scrolling across the bottom ticker
 TICKER_TEXT = (
-    "WELCOME TO SPORTS MEET 2026   ★   TENDER HEART SCHOOL   ★   "
+    "WELCOME TO SPORTS MEET 2026   ★   TENDER HEART HIGH SCHOOL   ★   "
     "PLEASE TAKE YOUR SEATS IN THE VISITORS' GALLERY   ★   "
     "FIRST AID & REFRESHMENTS AT PAVILION B   ★   "
     "FAIR PLAY, RESPECT, AND EXCELLENCE FOR ALL ATHLETES   ★   "
