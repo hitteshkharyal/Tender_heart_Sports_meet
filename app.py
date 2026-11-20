@@ -67,7 +67,6 @@ st.markdown("""
     html, body {
         margin: 0 !important;
         padding: 0 !important;
-        overflow: hidden !important;
         background: #060b19 !important;
     }
 
@@ -293,20 +292,87 @@ st.markdown("""
         padding: 0 !important;
     }
 
-    /* Modern Glassmorphic Dark Sidebar */
-    section[data-testid="stSidebar"] {
-        background: rgba(10, 16, 36, 0.96) !important;
-        border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
+    /* Modern Glassmorphic Dark Sidebar (Visible in Normal & Fullscreen Mode) */
+    section[data-testid="stSidebar"],
+    :fullscreen section[data-testid="stSidebar"],
+    :-webkit-full-screen section[data-testid="stSidebar"] {
+        display: block !important;
+        visibility: visible !important;
+        background: #080f26 !important;
+        border-right: 1px solid rgba(255, 215, 0, 0.3) !important;
+        z-index: 1000000 !important;
+    }
+    section[data-testid="stSidebar"] > div {
+        overflow-y: auto !important;
     }
     section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {
-        gap: 0.5rem !important;
+        gap: 0.6rem !important;
     }
-    section[data-testid="stSidebar"] .stRadio label,
-    section[data-testid="stSidebar"] .stSelectbox label {
-        color: #94a3b8 !important;
-        font-weight: 700 !important;
+
+    /* All text inside sidebar is white and clear */
+    section[data-testid="stSidebar"] * {
+        color: #ffffff !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+        color: #ffd700 !important;
+        font-weight: 800 !important;
         font-size: 12px !important;
+        letter-spacing: 0.8px !important;
         text-transform: uppercase !important;
+    }
+
+    /* Radio buttons in sidebar */
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label {
+        background: rgba(18, 30, 66, 0.85) !important;
+        border: 1px solid rgba(255, 255, 255, 0.18) !important;
+        border-radius: 8px !important;
+        padding: 6px 12px !important;
+        margin-bottom: 4px !important;
+        cursor: pointer !important;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+        background: rgba(37, 99, 235, 0.35) !important;
+        border-color: #ffd700 !important;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] p {
+        color: #ffffff !important;
+        font-size: 13px !important;
+        font-weight: 600 !important;
+    }
+
+    /* Selectbox in sidebar */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] {
+        background: rgba(18, 30, 66, 0.95) !important;
+        border: 1px solid rgba(255, 215, 0, 0.4) !important;
+        border-radius: 8px !important;
+    }
+    section[data-testid="stSidebar"] div[data-baseweb="select"] * {
+        color: #ffffff !important;
+        font-size: 13px !important;
+        font-weight: 600 !important;
+    }
+
+    /* Checkbox in sidebar */
+    section[data-testid="stSidebar"] label[data-testid="stCheckbox"] span {
+        color: #ffffff !important;
+        font-size: 13px !important;
+        font-weight: 600 !important;
+    }
+
+    /* Keep Sidebar Toggle Button visible in Fullscreen */
+    [data-testid="collapsedControl"],
+    :fullscreen [data-testid="collapsedControl"],
+    :-webkit-full-screen [data-testid="collapsedControl"] {
+        display: flex !important;
+        visibility: visible !important;
+        background: rgba(15, 25, 54, 0.95) !important;
+        border: 1px solid rgba(255, 215, 0, 0.6) !important;
+        border-radius: 8px !important;
+        color: #ffd700 !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6) !important;
+        top: 0.6rem !important;
+        left: 0.6rem !important;
+        z-index: 10000000 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -602,29 +668,25 @@ with st.sidebar:
 
     # 1. Camera Feed Mode Selector
     cam_modes = ["🎥 Hardware USB Camera", "🌐 Browser Live Camera"] if sys.platform.startswith("win") else ["🌐 Browser Live Camera", "🎥 Hardware USB Camera"]
-    if "cam_feed_mode" not in st.session_state:
-        st.session_state.cam_feed_mode = cam_modes[0]
-
     cam_mode = st.radio(
         "Camera Feed Mode",
         cam_modes,
-        key="cam_feed_mode"
+        index=0,
+        key="arena_feed_mode"
     )
 
     # 2. Hardware Camera Device Selector (Priority: Camera 0 External Lenovo FHD Cam)
     if cam_mode == "🎥 Hardware USB Camera":
-        if "active_hw_cam_idx" not in st.session_state:
-            st.session_state.active_hw_cam_idx = 0
-
+        current_active = st.session_state.get("active_hw_cam_idx", 0)
         chosen_cam_idx = st.selectbox(
             "Select Camera Device",
             options=[0, 1],
             format_func=lambda x: CAM_DEVICE_LABELS.get(x, f"Camera {x}"),
-            index=0 if st.session_state.active_hw_cam_idx == 0 else 1,
-            key="cam_device_select"
+            index=0 if current_active == 0 else 1,
+            key="arena_camera_idx"
         )
 
-        if st.session_state.active_hw_cam_idx != chosen_cam_idx:
+        if st.session_state.get("active_hw_cam_idx", 0) != chosen_cam_idx:
             st.session_state.active_hw_cam_idx = chosen_cam_idx
             if "cap" in st.session_state and st.session_state["cap"] is not None:
                 try:
