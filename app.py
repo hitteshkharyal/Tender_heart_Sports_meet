@@ -107,7 +107,7 @@ st.markdown("""
     .school-badge {
         background: linear-gradient(135deg, #ffd700 0%, #f59e0b 100%);
         color: #060a1a;
-        font-size: 15px;
+        font-size: 18px;
         font-weight: 900;
         padding: 4px 14px;
         border-radius: 8px;
@@ -406,38 +406,13 @@ POPUP_STATE = {
     "guest_id": 0
 }
 
-
-# ==================== HARDWARE CAMERA PROBE & SAFE OPEN HELPER ====================
-def list_hardware_cameras():
-    """Detect available physical hardware cameras on the host machine."""
-    cams = []
-    # Priority order: 0 (External Lenovo FHD Cam), 1 (Built-in Laptop Webcam), 2
-    for idx in [0, 1, 2]:
-        backend = cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
-        cap = cv2.VideoCapture(idx, backend)
-        if cap is not None and cap.isOpened():
-            try:
-                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            except Exception:
-                pass
-            ret, frame = cap.read()
-            if ret and frame is not None and frame.size > 0:
-                h, w = frame.shape[:2]
-                if idx == 0:
-                    lbl = f"📷 Camera 0: External Lenovo FHD Cam ({w}x{h})"
-                elif idx == 1:
-                    lbl = f"📷 Camera 1: Built-in Laptop Webcam ({w}x{h})"
-                else:
-                    lbl = f"📷 Camera {idx} ({w}x{h})"
-                cams.append((idx, lbl))
-            cap.release()
-    if not cams:
-        cams = [(0, "📷 Camera 0: External Lenovo FHD Cam"), (1, "📷 Camera 1: Built-in Laptop Webcam")]
-    return cams
+CAM_DEVICE_LABELS = {
+    0: "📷 Camera 0: External Lenovo FHD Cam (Priority)",
+    1: "📷 Camera 1: Built-in Laptop Webcam"
+}
 
 
+# ==================== HARDWARE CAMERA SAFE OPEN HELPER ====================
 def safe_open_camera(source=None):
     """
     Safely open the specified camera source at native HD resolution.
@@ -449,9 +424,48 @@ def safe_open_camera(source=None):
     elif source is not None:
         candidates = [source]
     else:
-        # Priority: Camera 0 (Lenovo FHD External Camera), then 1 (Built-in)
         primary = C.CAMERA_SOURCE
-        candidates = [primary] + [i for i in [0, 1, 2] if i != primary]
+        candidates = [primary] + [i for i in [0, 1] if i != primary]
+
+    for src in candidates:
+        backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if (isinstance(src, int) and sys.platform.startswith("win")) else [cv2.CAP_ANY]
+        for b in backends:
+            cap = None
+            try:
+                cap = cv2.VideoCapture(src, b)
+                if cap is not None and cap.isOpened():
+                    try:
+                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, C.CAMERA_WIDTH)
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, C.CAMERA_HEIGHT)
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_FPS, 30)
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+
+                    ok, frame = cap.read()
+                    if ok and frame is not None and frame.size > 0:
+                        return cap
+                    cap.release()
+            except Exception:
+                if cap is not None:
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+    return None
 
     for src in candidates:
         backends = [cv2.CAP_DSHOW, cv2.CAP_ANY] if (isinstance(src, int) and sys.platform.startswith("win")) else [cv2.CAP_ANY]
@@ -573,50 +587,30 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # 1. Camera Feed Mode Selector
-    cam_options = ["🌐 Browser Live Camera", "🎥 Hardware USB Camera"]
-    default_cam_idx = 0
-    if sys.platform.startswith("win"):
-        if "has_hw_cam" not in st.session_state:
-            _test = safe_open_camera(0) or safe_open_camera(1)
-            st.session_state.has_hw_cam = (_test is not None)
-            if _test is not None:
-                st.session_state["cap"] = _test
-        if st.session_state.get("has_hw_cam", False):
-            default_cam_idx = 1
+    cam_modes = ["🎥 Hardware USB Camera", "🌐 Browser Live Camera"] if sys.platform.startswith("win") else ["🌐 Browser Live Camera", "🎥 Hardware USB Camera"]
+    if "cam_feed_mode" not in st.session_state:
+        st.session_state.cam_feed_mode = cam_modes[0]
 
     cam_mode = st.radio(
         "Camera Feed Mode",
-        cam_options,
-        index=default_cam_idx,
-        key="cam_mode_select"
+        cam_modes,
+        key="cam_feed_mode"
     )
 
     # 2. Hardware Camera Device Selector (Priority: Camera 0 External Lenovo FHD Cam)
     if cam_mode == "🎥 Hardware USB Camera":
-        hw_cams = list_hardware_cameras()
-        cam_indices = [c[0] for c in hw_cams]
-        cam_labels = [c[1] for c in hw_cams]
+        if "active_hw_cam_idx" not in st.session_state:
+            st.session_state.active_hw_cam_idx = 0
 
-        pref_pos = 0
-        if 0 in cam_indices:
-            pref_pos = cam_indices.index(0)
-        elif C.CAMERA_SOURCE in cam_indices:
-            pref_pos = cam_indices.index(C.CAMERA_SOURCE)
-
-        cur_sel = st.session_state.get("hw_cam_choice_idx", pref_pos)
-        if cur_sel >= len(cam_labels):
-            cur_sel = 0
-
-        chosen_label = st.selectbox(
+        chosen_cam_idx = st.selectbox(
             "Select Camera Device",
-            options=cam_labels,
-            index=cur_sel,
-            key="hw_camera_choice"
+            options=[0, 1],
+            format_func=lambda x: CAM_DEVICE_LABELS.get(x, f"Camera {x}"),
+            index=0 if st.session_state.active_hw_cam_idx == 0 else 1,
+            key="cam_device_select"
         )
-        chosen_cam_idx = hw_cams[cam_labels.index(chosen_label)][0]
-        st.session_state.hw_cam_choice_idx = cam_labels.index(chosen_label)
 
-        if st.session_state.get("active_hw_cam_idx") != chosen_cam_idx:
+        if st.session_state.active_hw_cam_idx != chosen_cam_idx:
             st.session_state.active_hw_cam_idx = chosen_cam_idx
             if "cap" in st.session_state and st.session_state["cap"] is not None:
                 try:
