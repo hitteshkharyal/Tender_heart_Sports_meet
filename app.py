@@ -200,7 +200,9 @@ st.markdown("""
         border-radius: 14px !important;
         border: 1px solid rgba(255, 255, 255, 0.16) !important;
         border-top: 1px solid rgba(255, 255, 255, 0.28) !important;
-        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.5) !important;
+        image-rendering: -webkit-optimize-contrast !important;
+        image-rendering: crisp-edges !important;
     }
 
     /* Glassmorphism Welcome Banner */
@@ -312,9 +314,9 @@ if "reset_cooldown" not in st.session_state:
 # ==================== SAFE CAMERA OPEN HELPER ====================
 def safe_open_camera(source=None):
     """
-    Safely open any available camera source.
-    Scans all device camera indices (0, 1, 2, 3, 4) with both DirectShow and standard backends,
-    verifying actual frame readability before returning.
+    Safely open any available camera source at native HD resolution.
+    Sets MJPG hardware compression and 1280x720 / 1080p target dimensions BEFORE
+    initial frame acquisition to prevent Windows DirectShow from locking to 480p YUY2.
     """
     candidates = []
     if source is not None and not isinstance(source, int):
@@ -330,17 +332,31 @@ def safe_open_camera(source=None):
             try:
                 cap = cv2.VideoCapture(src, b)
                 if cap is not None and cap.isOpened():
+                    # Set MJPG codec & resolution BEFORE reading to prevent driver 480p lock
+                    try:
+                        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, C.CAMERA_WIDTH)
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, C.CAMERA_HEIGHT)
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_FPS, 30)
+                    except Exception:
+                        pass
+                    try:
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+
                     ok, frame = cap.read()
                     if ok and frame is not None and frame.size > 0:
-                        try:
-                            cap.set(cv2.CAP_PROP_FRAME_WIDTH, C.CAMERA_WIDTH)
-                        except Exception:
-                            pass
-                        try:
-                            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, C.CAMERA_HEIGHT)
-                        except Exception:
-                            pass
-                        print(f"[camera] Successfully connected to device camera {src}")
+                        print(f"[camera] Connected to camera {src} at native resolution {frame.shape[1]}x{frame.shape[0]} HD")
                         return cap
                     cap.release()
             except Exception:
@@ -648,9 +664,9 @@ with col_vid:
             video_processor_factory=WebRTCProcessor,
             media_stream_constraints={
                 "video": {
-                    "width": {"min": 640, "ideal": 1280},
-                    "height": {"min": 480, "ideal": 720},
-                    "frameRate": {"ideal": 20, "max": 24}
+                    "width": {"ideal": 1920, "min": 1280},
+                    "height": {"ideal": 1080, "min": 720},
+                    "frameRate": {"ideal": 30, "min": 24}
                 },
                 "audio": False
             },
